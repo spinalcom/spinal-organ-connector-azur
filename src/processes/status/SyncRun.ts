@@ -23,7 +23,6 @@
  */
 
 import { SpinalGraphService, SpinalContext, SpinalGraph, SpinalNode } from 'spinal-env-viewer-graph-service';
-import { GEO_BUILDING_TYPE, GEO_FIND_BUILDING, GEO_FLOOR_TYPE, GEO_ROOM_TYPE } from '../../constants';
 import OrganConfigModel from '../../model/OrganConfigModel';
 import IStatus from './IStatus';
 import SyncRunPullApi from './SyncRunHandler/SyncRunPullApi';
