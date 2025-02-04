@@ -103,14 +103,6 @@ export class SyncRunPullApi {
     });
   }
 
-  // dateToNumber(dateString: string | Date) {
-  //   const dateObj = new Date(dateString);
-  //   return dateObj.getTime();
-  // }
-  // async addEndpointAttributes(node :SpinalNode<any>, measure : IDeviceMeasure ){
-  //   await attributeService.addAttributeByCategoryName(node,'KardhamDigital','measure_code',measure.measure_code,'string')
-  // }
-
   async addDeviceAttributes(node: SpinalNode<any>, assetId) {
     await attributeService.addAttributeByCategoryName(
       node,
@@ -164,43 +156,63 @@ export class SyncRunPullApi {
     const deviceNodeModel = new InputDataDevice(deviceName, 'device');
     await this.nwService.updateData(deviceNodeModel);
     console.log('Created device ', deviceName);
+  }
 
-    //await this.modifyMaxDayAttribute();
+  async getDeviceAssetId(deviceNode : SpinalNode<any>){
+    const attributes = await attributeService.getAttributesByCategory(deviceNode, 'KardhamDigital');
+
+    const assetId = attributes.find(attr => attr.label.get() === 'asset_id');
+    return assetId?.value?.get() || undefined;
   }
 
   async updateFromMessage(message: CapabilityMessage) {
-    let devices = await this.networkContext.findInContext(
+    let allDevices = await this.networkContext.findInContext(
       this.networkContext,
-      (node) => node.info.name.get() === message.value.asset.name
+       (node) => {
+        return node.info.type.get() === 'BmsDevice'
+      }
     );
 
-    if (devices.length == 0) {
+    let deviceNode = undefined;
+
+    for(const node of allDevices){
+      const assetId = await this.getDeviceAssetId(node);
+      if (assetId === message.value.asset.assetId) {
+        deviceNode = node;
+        break; // Found the matching node, exit the loop.
+      }
+    }
+    
+    if (!deviceNode) {
       console.log(
         'Device do not exist, creating new device... ',
         message.value.asset.name
       );
       await this.createDevice(message.value.asset.name);
-      devices = await this.networkContext.findInContext(
+      deviceNode = await this.networkContext.findOneInContext(
         this.networkContext,
         (node) => node.info.name.get() === message.value.asset.name
       );
+      // @ts-ignore
+      SpinalGraphService._addNode(deviceNode);
+      this.addDeviceAttributes(deviceNode, message.value.asset.assetId);
     }
-    const deviceNode = devices[0];
+    else {
+      // @ts-ignore
+      SpinalGraphService._addNode(deviceNode);
+      // rename device if name has changed
+      if (deviceNode.info.name.get() !== message.value.asset.name) {
+        console.warn('Renaming device ', deviceNode.info.name.get(), 'to', message.value.asset.name);
+        deviceNode.info.name.set(message.value.asset.name);
+      }
+    }
 
-    // @ts-ignore
-    SpinalGraphService._addNode(deviceNode);
-
-    this.addDeviceAttributes(deviceNode, message.value.asset.assetId);
 
     const endpointNodes = await deviceNode.getChildren('hasBmsEndpoint');
 
     // try to find endpoint that has the name
     const endpoint_value: CapabilityValue = JSON.parse(message.value.value);
 
-    // convert the string to number if it's a string.
-    // if(message.value.class.className == 'Capability.Status.Health_Status '){
-    //   endpoint_value.value = endpoint_value.value === 'operational' ? 1 : 0;
-    // }
 
     if (typeof endpoint_value.value === 'string') {
       console.log(`Converting string ${endpoint_value.value} to number `);
@@ -226,14 +238,12 @@ export class SyncRunPullApi {
         endpointNode.info.id.get(),
         endpoint_value.value
       );
-
       if (endpoint_value.value) {
         await this.timeseriesService.pushFromEndpoint(
           endpointNode.info.id.get(),
           endpoint_value.value
         );
       }
-
       const realNode = SpinalGraphService.getRealNode(endpointNode.getId().get());
       await attributeService.updateAttribute(
         realNode,
